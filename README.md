@@ -1,3 +1,3 @@
-# demon
+# daemon
 
-This package is intended to create simple CLI demons as singletons across your application.
+This Go package is intended to create simple CLI daemons as singletons across your application.
