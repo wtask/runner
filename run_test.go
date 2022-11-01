@@ -13,8 +13,8 @@ func TestRun(t *testing.T) {
 	// avoid run sub tests in parallel
 	t.Run("Context", run_context)
 	t.Run("Signal", run_signal)
-	t.Run("Service-Error", run_service_error)
-	t.Run("Service-Panic", run_service_panic)
+	t.Run("Job-Error", run_job_error)
+	t.Run("Job-Panic", run_job_panic)
 }
 
 func run_context(t *testing.T) {
@@ -36,7 +36,7 @@ func run_context(t *testing.T) {
 
 		done.run <- Run(
 			ctx,
-			WithService(func(ctx context.Context) error {
+			WithJob(func(ctx context.Context) error {
 				select {
 				case <-time.After(timeout):
 					return fmt.Errorf("service 1: timeout expired")
@@ -45,7 +45,7 @@ func run_context(t *testing.T) {
 					return nil
 				}
 			}),
-			WithService(func(ctx context.Context) error {
+			WithJob(func(ctx context.Context) error {
 				select {
 				case <-time.After(timeout):
 					return fmt.Errorf("service 2: timeout expired")
@@ -103,7 +103,7 @@ func run_signal(t *testing.T) {
 
 		done.run <- Run(
 			context.Background(),
-			WithService(func(ctx context.Context) error {
+			WithJob(func(ctx context.Context) error {
 				select {
 				case <-time.After(timeout):
 					return fmt.Errorf("service 1: timeout expired")
@@ -112,7 +112,7 @@ func run_signal(t *testing.T) {
 					return nil
 				}
 			}),
-			WithService(func(ctx context.Context) error {
+			WithJob(func(ctx context.Context) error {
 				select {
 				case <-time.After(timeout):
 					return fmt.Errorf("service 2: timeout expired")
@@ -152,7 +152,7 @@ func run_signal(t *testing.T) {
 	}
 }
 
-func run_service_error(t *testing.T) {
+func run_job_error(t *testing.T) {
 	done := struct {
 		run                chan error
 		service1, service2 bool
@@ -167,11 +167,11 @@ func run_service_error(t *testing.T) {
 
 		done.run <- Run(
 			context.Background(),
-			WithService(func(ctx context.Context) error {
+			WithJob(func(ctx context.Context) error {
 				time.Sleep(250 * time.Millisecond)
 				return fmt.Errorf("service 1: %w", errFailure)
 			}),
-			WithService(func(ctx context.Context) error {
+			WithJob(func(ctx context.Context) error {
 				<-ctx.Done()
 				done.service2 = true
 				return nil
@@ -195,7 +195,7 @@ func run_service_error(t *testing.T) {
 	}
 }
 
-func run_service_panic(t *testing.T) {
+func run_job_panic(t *testing.T) {
 	done := struct {
 		run                chan error
 		service1, service2 bool
@@ -208,12 +208,12 @@ func run_service_panic(t *testing.T) {
 
 		done.run <- Run(
 			context.Background(),
-			WithService(func(ctx context.Context) error {
+			WithJob(func(ctx context.Context) error {
 				<-ctx.Done()
 				done.service1 = true
 				return nil
 			}),
-			WithService(func(ctx context.Context) error {
+			WithJob(func(ctx context.Context) error {
 				time.Sleep(250 * time.Millisecond)
 				panic("service 2 panic")
 			}),

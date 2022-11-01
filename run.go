@@ -18,8 +18,9 @@ func IsStarted() bool {
 	return atomic.CompareAndSwapInt32(&started, 1, 1)
 }
 
-// Run starts required goroutines for services are specified through the options
-// and then blocks execution until termination signal will received from OS or any service return an error.
+// Run starts required goroutines for jobs are specified through the options
+// and then blocks execution until termination signal will received from OS
+// or any job will return an error or all jobs will done.
 func Run(ctx context.Context, options ...Option) error {
 	if !atomic.CompareAndSwapInt32(&started, 0, 1) {
 		return fmt.Errorf("already started")
@@ -34,36 +35,36 @@ func Run(ctx context.Context, options ...Option) error {
 		return err
 	}
 
-	c, cancel := context.WithCancel(ctx)
-	threads, background := errgroup.WithContext(c)
+	ctx, cancel := context.WithCancel(ctx)
+	runner, background := errgroup.WithContext(ctx)
 
-	for _, service := range services {
-		if service == nil {
+	for _, job := range jobs {
+		if job == nil {
 			continue
 		}
 
-		service := service
-		threads.Go(func() (err error) {
+		job := job
+		runner.Go(func() (err error) {
 			defer func() {
 				if r := recover(); r != nil {
-					err = fmt.Errorf("service thread failure: %v", r)
+					err = fmt.Errorf("job failure: %v", r)
 				}
 			}()
 
-			return service(background)
+			return job(background)
 		})
 	}
 
 	waitSignal(background)
 	cancel()
 
-	return release(standstill, threads.Wait)
+	return release(standstill, runner.Wait)
 }
 
 var signals = make(chan os.Signal, 1)
 
 func waitSignal(ctx context.Context) {
-	signal.Notify(signals) // all available signals
+	signal.Notify(signals) // all available os signals
 
 	defer func() {
 		signal.Stop(signals)
@@ -79,13 +80,15 @@ func waitSignal(ctx context.Context) {
 				return
 			}
 
-			if action, ok := continueActions[sig]; ok && action != nil {
+			if action := actions[sig]; action != nil {
 				go action(ctx)
 			}
 		}
 	}
 }
 
+// release runs wait-function in separate goroutine and returns its result
+// or error after specified time is expired.
 func release(after time.Duration, wait func() error) error {
 	done := make(chan error, 1)
 	go func() {

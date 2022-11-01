@@ -8,24 +8,36 @@ import (
 	"time"
 )
 
-// Option represents function that can be executed before the daemon starts.
+// Option represents an optional feature for the runner.
+// Under the hood the option is a function which will be executed
+// before the daemon blocks on listening the os signals.
+// You are free to define custom options affected on your own code base.
 type Option func() error
 
 var (
+	// stop signals
 	stops = map[os.Signal]struct{}{
 		syscall.SIGINT:  {},
 		syscall.SIGTERM: {},
 	}
 
-	continueActions = make(map[os.Signal]func(context.Context))
+	// signal actions
+	actions = make(map[os.Signal]func(context.Context))
 
-	services []func(context.Context) error
+	jobs []func(context.Context) error
 
-	standstill = 5 * time.Second // Period to wait for all services will stop before exit from Run
+	// standstill is a period to wait for all jobs will stop before exit from daemon.Run()
+	standstill = defaultStandstill
+)
+
+const (
+	defaultStandstill = 5 * time.Second
 )
 
 // WithStopSignal allows to append specified signal to daemon's default stop list.
 // Note, SIGINT and SIGTERM are registered by default.
+// When stop signal is received the runner will cancel his jobs
+// and will exit not later than the standstill time expires.
 func WithStopSignal(sig os.Signal) Option {
 	return func() error {
 		stops[sig] = struct{}{}
@@ -34,26 +46,35 @@ func WithStopSignal(sig os.Signal) Option {
 	}
 }
 
-// WithContinueAction allows to add/replace action for specified signal.
-func WithContinueAction(sig os.Signal, action func(context.Context)) Option {
+// WithSignalAction allows to register an action for specified signal.
+// When signal is received the corresponding action will run in separate goroutine
+// but the runner will continue work.
+// It is allowed to register any signal action with this option,
+// however the stop signals are processed first, so their actions always ignored
+// if they are registered here (SIGTERM and SIGINT by default).
+func WithSignalAction(sig os.Signal, action func(context.Context)) Option {
 	return func() error {
-		continueActions[sig] = action
+		actions[sig] = action
 
 		return nil
 	}
 }
 
-// WithService allows to register specified service to start with daemon context.
-// It is important the service will be able to immediately stop when context will done.
-func WithService(service func(context.Context) error) Option {
+// WithJob allows to register specified function as background job running with daemon context.
+// It is important that the job will be able to immediately stop when context will done.
+// All jobs are cancelled when one of them returns with error
+// or daemon runner received a stop signal.
+func WithJob(job func(context.Context) error) Option {
 	return func() error {
-		services = append(services, service)
+		jobs = append(jobs, job)
 
 		return nil
 	}
 }
 
-// WithStandstill allows to change default period (5 sec) is required to wait for running services to stop.
+// WithStandstill allows to change default period (5 sec) which is required
+// to wait for all running jobs to stop before the runner exits.
+// If any of background jobs can not stop in this period then it is lost.
 func WithStandstill(period time.Duration) Option {
 	return func() error {
 		if period < 0 {
@@ -86,6 +107,7 @@ func applyOptions(options ...Option) (err error) {
 	return nil
 }
 
+// resetOptions sets internal package vars to their default values
 func resetOptions() {
 	for k := range stops {
 		if !(k == syscall.SIGINT || k == syscall.SIGTERM) {
@@ -93,10 +115,10 @@ func resetOptions() {
 		}
 	}
 
-	for k := range continueActions {
-		delete(continueActions, k)
+	for k := range actions {
+		delete(actions, k)
 	}
 
-	services = services[:0]
-	standstill = 5 * time.Second
+	jobs = jobs[:0]
+	standstill = defaultStandstill
 }
