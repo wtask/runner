@@ -13,6 +13,7 @@ import (
 
 var started int32
 
+// IsStarted returns true when daemon.Run() is started and false otherwise.
 func IsStarted() bool {
 	return atomic.CompareAndSwapInt32(&started, 1, 1)
 }
@@ -56,14 +57,18 @@ func Run(ctx context.Context, options ...Option) error {
 	waitSignal(background)
 	cancel()
 
-	return release(threads.Wait)
+	return release(standstill, threads.Wait)
 }
 
+var signals = make(chan os.Signal, 1)
+
 func waitSignal(ctx context.Context) {
-	signals := make(chan os.Signal, 1)
 	signal.Notify(signals) // all available signals
 
-	defer signal.Stop(signals)
+	defer func() {
+		signal.Stop(signals)
+		signal.Reset()
+	}()
 
 	for {
 		select {
@@ -81,7 +86,7 @@ func waitSignal(ctx context.Context) {
 	}
 }
 
-func release(wait func() error) error {
+func release(after time.Duration, wait func() error) error {
 	done := make(chan error, 1)
 	go func() {
 		defer close(done)
@@ -92,7 +97,7 @@ func release(wait func() error) error {
 	select {
 	case err := <-done:
 		return err
-	case <-time.After(standstill):
-		return fmt.Errorf("standstill period (%s) expired: services were not stopped in time", standstill)
+	case <-time.After(after):
+		return fmt.Errorf("forced release: awaiting period (%s) has expired", after)
 	}
 }
